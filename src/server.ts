@@ -33,6 +33,7 @@ import { anilistHindiRouter } from "./routes/anilisthindi/index.js";
 import { toonWorldRouter } from "./routes/toonworld/index.js";
 import { webhookRouter } from "./routes/webhooks/index.js";
 import pkgJson from "../package.json" with { type: "json" };
+import { anilistRouter } from "./routes/anilist/index.js";
 
 // API version
 const BASE_PATH = "/api/v1" as const;
@@ -605,6 +606,7 @@ app.get("/", (c) =>
         endpoints: {
             hianime: `${BASE_PATH}/hianime`,
             consumet: `${BASE_PATH}/consumet`,
+            anilist: `${BASE_PATH}/anilist`,
             regional: {
                 hindiDubbed: `${BASE_PATH}/hindidubbed`,
                 toonstream: `${BASE_PATH}/toonstream`,
@@ -637,6 +639,8 @@ app.route(`${BASE_PATH}/hindiapi`, hindiApiRouter);
 app.route(`${BASE_PATH}/anilisthindi`, anilistHindiRouter);
 app.route(`${BASE_PATH}/toonworld`, toonWorldRouter);
 app.route(`${BASE_PATH}/webhooks`, webhookRouter);
+app.route(`${BASE_PATH}/anilist`, anilistRouter);
+
 
 // ========== ERROR HANDLING ==========
 app.notFound(notFoundHandler);
