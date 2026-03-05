@@ -69,4 +69,4 @@ anilist.get('/info/:id', async (c) => {
   }
 });
 
-export default anilist;
+export { anilistRouter };
