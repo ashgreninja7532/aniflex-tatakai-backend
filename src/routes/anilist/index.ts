@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 
-const anilist = new Hono();
+// Define the router variable explicitly
+const anilistRouter = new Hono();
 const ANILIST_URL = 'https://graphql.anilist.co';
 
-// GraphQL Query for Search & Info
 const SEARCH_QUERY = `
 query ($id: Int, $page: Int, $perPage: Int, $search: String) {
   Page (page: $page, perPage: $perPage) {
@@ -16,6 +16,7 @@ query ($id: Int, $page: Int, $perPage: Int, $search: String) {
       }
       coverImage {
         large
+        extraLarge
       }
       bannerImage
       description
@@ -24,13 +25,14 @@ query ($id: Int, $page: Int, $perPage: Int, $search: String) {
       averageScore
       genres
       seasonYear
+      format
     }
   }
 }`;
 
-anilist.get('/search', async (c) => {
+anilistRouter.get('/search', async (c) => {
   const query = c.req.query('q');
-  if (!query) return c.json({ error: "Query parameter 'q' is required" }, 400);
+  if (!query) return c.json({ error: "Query 'q' is required" }, 400);
 
   try {
     const response = await fetch(ANILIST_URL, {
@@ -38,20 +40,19 @@ anilist.get('/search', async (c) => {
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({
         query: SEARCH_QUERY,
-        variables: { search: query, page: 1, perPage: 10 }
+        variables: { search: query, page: 1, perPage: 15 }
       })
     });
 
     const data: any = await response.json();
     return c.json(data.data.Page.media);
   } catch (err) {
-    return c.json({ error: "Failed to fetch from AniList" }, 500);
+    return c.json({ error: "AniList Search Failed" }, 500);
   }
 });
 
-anilist.get('/info/:id', async (c) => {
+anilistRouter.get('/info/:id', async (c) => {
   const id = c.req.param('id');
-  
   try {
     const response = await fetch(ANILIST_URL, {
       method: 'POST',
@@ -63,10 +64,12 @@ anilist.get('/info/:id', async (c) => {
     });
 
     const data: any = await response.json();
-    return c.json(data.data.Page.media[0] || { error: "Not Found" });
+    const result = data.data.Page.media[0];
+    return result ? c.json(result) : c.json({ error: "Not Found" }, 404);
   } catch (err) {
-    return c.json({ error: "Failed to fetch anime details" }, 500);
+    return c.json({ error: "AniList Info Failed" }, 500);
   }
 });
 
+// This is the line that was likely causing the error
 export { anilistRouter };
