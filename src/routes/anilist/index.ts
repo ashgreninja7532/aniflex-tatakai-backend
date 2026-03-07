@@ -4,36 +4,36 @@ const anilistRouter = new Hono();
 const ANILIST_URL = 'https://graphql.anilist.co';
 
 // ==========================================
-// GRAPHQL QUERIES
+// GRAPHQL QUERIES (Updated to extraLarge & No Hentai)
 // ==========================================
 
 const SEARCH_QUERY = `
 query ($id: Int, $page: Int, $perPage: Int, $search: String) {
   Page (page: $page, perPage: $perPage) {
-    media (id: $id, search: $search, type: ANIME) {
-      id title { romaji english native } coverImage { large extraLarge } bannerImage description episodes status averageScore genres seasonYear format
+    media (id: $id, search: $search, type: ANIME, isAdult: false) { 
+      id title { romaji english native } coverImage { extraLarge } bannerImage description episodes status averageScore genres seasonYear format
     }
   }
 }`;
 
 const INFO_QUERY = `
 query ($id: Int) {
-  Media(id: $id, type: ANIME) {
-    id title { romaji english native } coverImage { large extraLarge } bannerImage description episodes status averageScore genres seasonYear format
+  Media(id: $id, type: ANIME, isAdult: false) {
+    id title { romaji english native } coverImage { extraLarge } bannerImage description episodes status averageScore genres seasonYear format
     startDate { year month day } endDate { year month day }
     studios { edges { node { name isAnimationStudio } } }
     characters(sort: ROLE) {
       edges {
         role
         node { name { full } }
-        voiceActors(language: JAPANESE, sort: RELEVANCE) { name { full } image { large } }
+        voiceActors(language: JAPANESE, sort: RELEVANCE) { name { full } image { large } } 
       }
     }
     staff { edges { role node { name { full } image { large } } } }
     relations {
       edges {
         relationType
-        node { id title { romaji english native } format type status coverImage { large } }
+        node { id title { romaji english native } format type status isAdult coverImage { extraLarge } }
       }
     }
   }
@@ -51,9 +51,10 @@ query (
     media (
       id: $id, search: $search, type: $type, format: $format,
       sort: $sort, genre_in: $genres, seasonYear: $year,
-      status: $status, season: $season, countryOfOrigin: $countryOfOrigin
+      status: $status, season: $season, countryOfOrigin: $countryOfOrigin,
+      isAdult: false 
     ) {
-      id title { romaji english native } coverImage { large } format status episodes seasonYear averageScore genres
+      id title { romaji english native } coverImage { extraLarge } format status episodes seasonYear averageScore genres
     }
   }
 }`;
@@ -64,7 +65,7 @@ query($page: Int, $perPage: Int, $airingAt_lesser: Int) {
     pageInfo { total currentPage lastPage hasNextPage perPage }
     airingSchedules(airingAt_lesser: $airingAt_lesser, sort: TIME_DESC) {
       id episode airingAt
-      media { id title { romaji english native } coverImage { large } format status }
+      media { id title { romaji english native } coverImage { extraLarge } format status isAdult }
     }
   }
 }`;
@@ -102,13 +103,15 @@ anilistRouter.get('/search', async (c) => {
   }
 });
 
-// 2. Info (Updated with Relations)
+// 2. Info (with Relations & Safe Filtering)
 anilistRouter.get('/info/:id', async (c) => {
   const id = c.req.param('id');
   try {
     const data: any = await fetchAnilist(INFO_QUERY, { id: parseInt(id) });
     const media = data.data?.Media;
-    if (!media) return c.json({ error: "Not Found" }, 404);
+    
+    // If it's an 18+ ID, AniList returns null because we added isAdult: false
+    if (!media) return c.json({ error: "Not Found or Content Restricted" }, 404);
 
     const formatAiringDate = (dateObj: any) => dateObj.year ? `${dateObj.year}-${String(dateObj.month || 1).padStart(2, '0')}-${String(dateObj.day || 1).padStart(2, '0')}` : null;
 
@@ -127,15 +130,15 @@ anilistRouter.get('/info/:id', async (c) => {
         return [{ characterName: edge.node.name.full, vaName: va.name.full, vaImage: va.image.large }];
       }) || [];
 
-    // NEW: Format Relations (Prequels, Sequels, OVAs, etc.)
-    const relations = media.relations?.edges?.map((edge: any) => ({
-      relationType: edge.relationType, // e.g., SEQUEL, PREQUEL, SIDE_STORY, OVA
+    // Format Relations AND filter out any 18+ related works (like adult doujins/ovas)
+    const relations = media.relations?.edges?.filter((edge: any) => edge.node.isAdult === false).map((edge: any) => ({
+      relationType: edge.relationType,
       id: edge.node.id,
       title: edge.node.title,
       format: edge.node.format,
-      type: edge.node.type, // ANIME or MANGA
+      type: edge.node.type, 
       status: edge.node.status,
-      coverImage: edge.node.coverImage?.large
+      coverImage: edge.node.coverImage?.extraLarge // High quality
     })) || [];
 
     return c.json({
@@ -153,7 +156,7 @@ anilistRouter.get('/info/:id', async (c) => {
       startDate: formatAiringDate(media.startDate),
       endDate: formatAiringDate(media.endDate),
       studios, producers, staff, mainVoiceActors: voiceActors, 
-      relations // Added relations here
+      relations 
     });
   } catch (err) {
     return c.json({ error: "AniList Info Failed" }, 500);
@@ -167,10 +170,9 @@ anilistRouter.get('/advanced-search', async (c) => {
   const variables: any = {
     page: page ? parseInt(page) : 1,
     perPage: perPage ? parseInt(perPage) : 20,
-    type: type || "ANIME", // Default to ANIME
+    type: type || "ANIME", 
   };
 
-  // Only assign variables if they exist in query params
   if (query) variables.search = query;
   if (format) variables.format = format;
   if (sort) variables.sort = sort.includes(',') ? sort.split(',') : [sort];
@@ -213,20 +215,24 @@ anilistRouter.get('/popular', async (c) => {
   }
 });
 
-// 6. Genres (Get genre list OR search by genre)
+// 6. Genres
 anilistRouter.get('/genre', async (c) => {
   const genre = c.req.query('genre');
   const page = c.req.query('page') || "1";
 
   try {
-    // If a specific genre is provided, search anime by that genre
     if (genre) {
       const data: any = await fetchAnilist(ADVANCED_SEARCH_QUERY, { type: "ANIME", genres: [genre], sort: ["TRENDING_DESC"], page: parseInt(page), perPage: 20 });
       return c.json(data.data.Page);
     } 
-    // Otherwise, return the list of all available genres
+    
     const data: any = await fetchAnilist(GENRES_QUERY);
-    return c.json(data.data.GenreCollection);
+    const allGenres: string[] = data.data.GenreCollection;
+    
+    // Completely remove 'Hentai' from the genres list so users can't even tap it
+    const safeGenres = allGenres.filter(g => g !== 'Hentai');
+    
+    return c.json(safeGenres);
   } catch (err) {
     return c.json({ error: "Genre Fetch Failed" }, 500);
   }
@@ -236,12 +242,18 @@ anilistRouter.get('/genre', async (c) => {
 anilistRouter.get('/recent-episodes', async (c) => {
   const page = c.req.query('page') || "1";
   const perPage = c.req.query('perPage') || "20";
-  
-  // Get current timestamp in seconds to find episodes that have just aired
   const currentTimestamp = Math.floor(Date.now() / 1000);
 
   try {
     const data: any = await fetchAnilist(RECENT_EPISODES_QUERY, { page: parseInt(page), perPage: parseInt(perPage), airingAt_lesser: currentTimestamp });
+    
+    // AniList's airingSchedules doesn't accept the isAdult argument directly, 
+    // so we filter them out right here in the code before sending to the app!
+    const safeEpisodes = data.data.Page.airingSchedules.filter((item: any) => item.media.isAdult === false);
+    
+    // Replace the raw list with the safe list
+    data.data.Page.airingSchedules = safeEpisodes;
+
     return c.json(data.data.Page);
   } catch (err) {
     return c.json({ error: "Recent Episodes Fetch Failed" }, 500);
