@@ -16,7 +16,7 @@ async function fetchHtml(url: string) {
 }
 
 // ========== GOGOANIME PORT ==========
-const GOGO_URL = "https://gogoanime3.co";
+const GOGO_URL = "https://gogoanimes.cv";
 
 animeRouter.get("/gogoanime/:query", async (c) => {
     const cacheConfig = c.get("CACHE_CONFIG");
