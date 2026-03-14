@@ -34,6 +34,7 @@ import { toonWorldRouter } from "./routes/toonworld/index.js";
 import { webhookRouter } from "./routes/webhooks/index.js";
 import pkgJson from "../package.json" with { type: "json" };
 import { anilistRouter } from "./routes/anilist/index.js";
+import { animepaheRouter } from "./routes/animepahe/index.js";
 
 // API version
 const BASE_PATH = "/api/v1" as const;
@@ -607,6 +608,7 @@ app.get("/", (c) =>
             hianime: `${BASE_PATH}/hianime`,
             consumet: `${BASE_PATH}/consumet`,
             anilist: `${BASE_PATH}/anilist`,
+            animepahe: `${BASE_PATH}/animepahe`,
             regional: {
                 hindiDubbed: `${BASE_PATH}/hindidubbed`,
                 toonstream: `${BASE_PATH}/toonstream`,
@@ -640,6 +642,7 @@ app.route(`${BASE_PATH}/anilisthindi`, anilistHindiRouter);
 app.route(`${BASE_PATH}/toonworld`, toonWorldRouter);
 app.route(`${BASE_PATH}/webhooks`, webhookRouter);
 app.route(`${BASE_PATH}/anilist`, anilistRouter);
+app.route(`${BASE_PATH}/animepahe`, animepaheRouter);
 
 
 // ========== ERROR HANDLING ==========
