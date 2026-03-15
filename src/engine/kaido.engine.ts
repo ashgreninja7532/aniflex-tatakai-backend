@@ -102,17 +102,27 @@ export class KaidoScraper {
 // --- MEGACLOUD AES DECRYPTOR ---
     private async extractMegacloud(url: string) {
         try {
-            // 🛠️ FIX: Dynamically extract the exact host (e.g., rapid-cloud.co) from the URL!
             const parsedUrl = new URL(url);
             const host = parsedUrl.host;
             const sourceId = parsedUrl.pathname.split("/").pop()?.split("?")[0];
             
             if (!sourceId) throw new Error("Could not find Source ID in URL.");
 
-            // 1. Fetch raw encrypted data from the exact host that Kaido gave us
-            const { data: rawSourceData } = await axios.get(`https://${host}/embed-2/ajax/e-1/getSources?id=${sourceId}`, {
-                headers: { "X-Requested-With": "XMLHttpRequest", Referer: url }
-            });
+            let rawSourceData;
+
+            // 🛠️ FIX: We try the /v2/ URL you found first!
+            try {
+                const { data } = await axios.get(`https://${host}/embed-2/v2/e-1/getSources?id=${sourceId}`, {
+                    headers: { "X-Requested-With": "XMLHttpRequest", Referer: url }
+                });
+                rawSourceData = data;
+            } catch (e) {
+                // If /v2/ throws a 404, we automatically fallback to /ajax/
+                const { data } = await axios.get(`https://${host}/embed-2/ajax/e-1/getSources?id=${sourceId}`, {
+                    headers: { "X-Requested-With": "XMLHttpRequest", Referer: url }
+                });
+                rawSourceData = data;
+            }
 
             const extractedData = {
                 sources: [] as any[], tracks: [] as any[],
