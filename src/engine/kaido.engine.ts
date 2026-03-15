@@ -99,36 +99,41 @@ export class KaidoScraper {
         } catch (err) { throw err; }
     }
 
-    // --- MEGACLOUD AES DECRYPTOR ---
+// --- MEGACLOUD AES DECRYPTOR ---
     private async extractMegacloud(url: string) {
         try {
-            const sourceId = url.split("/").pop()?.split("?")[0];
+            // 🛠️ FIX: Dynamically extract the exact host (e.g., rapid-cloud.co) from the URL!
+            const parsedUrl = new URL(url);
+            const host = parsedUrl.host;
+            const sourceId = parsedUrl.pathname.split("/").pop()?.split("?")[0];
             
-            // 1. Fetch raw encrypted data
-            const { data: rawSourceData } = await axios.get(`https://megacloud.blog/embed-2/ajax/e-1/getSources?id=${sourceId}`, {
+            if (!sourceId) throw new Error("Could not find Source ID in URL.");
+
+            // 1. Fetch raw encrypted data from the exact host that Kaido gave us
+            const { data: rawSourceData } = await axios.get(`https://${host}/embed-2/ajax/e-1/getSources?id=${sourceId}`, {
                 headers: { "X-Requested-With": "XMLHttpRequest", Referer: url }
             });
 
             const extractedData = {
                 sources: [] as any[], tracks: [] as any[],
                 intro: rawSourceData.intro, outro: rawSourceData.outro,
-                headers: { "Referer": "https://megacloud.blog/" }
+                headers: { "Referer": `https://${host}/` }
             };
 
             extractedData.tracks = rawSourceData.tracks?.map((track: any) => ({
                 url: track.file, lang: track.label || track.kind
             })) || [];
 
-            // 2. Return unencrypted sources immediately
+            // 2. If it's NOT encrypted, return immediately
             if (!rawSourceData.encrypted && Array.isArray(rawSourceData.sources)) {
                 extractedData.sources = rawSourceData.sources.map((s: any) => ({ url: s.file, type: s.type }));
                 return extractedData;
             }
 
-            // 3. Fetch Master Key
+            // 3. If it IS encrypted, fetch the master key from GitHub
             const { data: keyData } = await axios.get("https://raw.githubusercontent.com/itzzzme/megacloud-keys/refs/heads/main/key.txt");
             
-            // 4. Decrypt 
+            // 4. Decrypt the string using AES!
             const decrypted = CryptoJS.AES.decrypt(rawSourceData.sources, keyData.trim()).toString(CryptoJS.enc.Utf8);
             const decryptedSources = JSON.parse(decrypted);
 
@@ -137,4 +142,3 @@ export class KaidoScraper {
 
         } catch (err) { throw new Error(`Decryption failed: ${err}`); }
     }
-}
