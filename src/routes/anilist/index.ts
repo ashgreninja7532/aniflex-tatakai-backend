@@ -93,10 +93,13 @@ const fetchAnilist = async (query: string, variables: any = {}) => {
 // 1. Basic Search
 anilistRouter.get('/search', async (c) => {
   const query = c.req.query('q');
+  // 🛠️ FIX: Extract the page from the URL, default to 1
+  const page = c.req.query('page') || "1"; 
   if (!query) return c.json({ error: "Query 'q' is required" }, 400);
 
   try {
-    const data: any = await fetchAnilist(SEARCH_QUERY, { search: query, page: 1, perPage: 15 });
+    // 🛠️ FIX: Pass parseInt(page) to the AniList fetcher instead of hardcoding 1
+    const data: any = await fetchAnilist(SEARCH_QUERY, { search: query, page: parseInt(page), perPage: 20 });
     return c.json(data.data.Page.media);
   } catch (err) {
     return c.json({ error: "AniList Search Failed" }, 500);
