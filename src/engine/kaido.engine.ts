@@ -16,8 +16,8 @@ export class KaidoScraper {
         }
     });
 
-    // ==========================================
-    // 1. SEARCH (Now with Pagination & Sub/Dub!)
+  // ==========================================
+    // 1. SEARCH (Bulletproof CSS Selector)
     // ==========================================
     async search(query: string, page: number = 1) {
         const res = { animes: [] as any[], hasNextPage: false };
@@ -27,13 +27,13 @@ export class KaidoScraper {
             
             res.hasNextPage = $(".pagination > li").last().hasClass("active") ? false : ($(".pagination > li").length > 0);
 
-            $("#main-content .tab-content .film_list-wrap .flw-item").each((_, el) => {
+            // 🛠️ FIX: Removed .tab-content from selector so it doesn't break!
+            $(".film_list-wrap .flw-item").each((_, el) => {
                 const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
                 const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
                 const poster = $(el).find(".film-poster .film-poster-img").attr("data-src")?.trim() || "";
                 const type = $(el).find(".film-detail .fd-infor .fdi-item:nth-of-type(1)").text().trim();
                 
-                // 🛠️ FIX: Added Sub/Dub Counts
                 const sub = Number($(el).find(".film-poster .tick-sub").text().trim().split(" ").pop()) || 0;
                 const dub = Number($(el).find(".film-poster .tick-dub").text().trim().split(" ").pop()) || 0;
                 
@@ -42,7 +42,7 @@ export class KaidoScraper {
             return res;
         } catch (err) { throw err; }
     }
-
+    
     // ==========================================
     // 2. EPISODES LIST (Updated URL logic)
     // ==========================================
@@ -306,24 +306,26 @@ export class KaidoScraper {
         };
     }
 
-     // ==========================================
-    // 8. ADVANCED SEARCH (For 'Similar Anime')
+   
+    // ==========================================
+    // 8. ADVANCED SEARCH / FILTER
     // ==========================================
     async advancedSearch(genres: string, page: number = 1) {
         const res = { animes: [] as any[], hasNextPage: false };
         try {
-            // Kaido filters genres using comma-separated IDs or names depending on the URL structure
-            // We use the filter page to find similar matches
+            // Kaido's filter page expects genre IDs (e.g. Action = 1, Adventure = 2)
             const { data } = await this.client.get(`${BASE_URL}/filter?genre=${genres}&sort=recently_updated&page=${page}`);
             const $ = cheerio.load(data);
             
             res.hasNextPage = $(".pagination > li").last().hasClass("active") ? false : ($(".pagination > li").length > 0);
 
-            $("#main-content .tab-content .film_list-wrap .flw-item").each((_, el) => {
+            // 🛠️ FIX: Broader selector handles the filter grid layout perfectly
+            $(".film_list-wrap .flw-item").each((_, el) => {
                 const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
                 const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
                 const poster = $(el).find(".film-poster .film-poster-img").attr("data-src")?.trim() || "";
                 const type = $(el).find(".film-detail .fd-infor .fdi-item:nth-of-type(1)").text().trim();
+                
                 const sub = Number($(el).find(".film-poster .tick-sub").text().trim().split(" ").pop()) || 0;
                 const dub = Number($(el).find(".film-poster .tick-dub").text().trim().split(" ").pop()) || 0;
                 
