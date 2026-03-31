@@ -163,7 +163,7 @@ export class KaidoScraper {
     // 5. HOME PAGE DATA
     // ==========================================
     async getHomePage() {
-        const res = { spotlightAnimes: [] as any[], trendingAnimes: [] as any[], latestEpisodeAnimes: [] as any[], mostPopularAnimes: [] as any[] };
+        const res = { spotlightAnimes: [] as any[], trendingAnimes: [] as any[], topMovies: [] as any[], latestEpisodeAnimes: [] as any[], mostPopularAnimes: [] as any[] };
         try {
             const { data } = await this.client.get(`${BASE_URL}/home`);
             const $ = cheerio.load(data);
