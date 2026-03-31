@@ -16,18 +16,25 @@ export class KaidoScraper {
         }
     });
 
-  // ==========================================
-    // 1. SEARCH (Bulletproof CSS Selector)
+ // ==========================================
+    // 1. SEARCH & ADVANCED SEARCH (Combined)
     // ==========================================
-    async search(query: string, page: number = 1) {
+    async search(query: string, page: number = 1, filters: any = {}) {
         const res = { animes: [] as any[], hasNextPage: false };
         try {
-            const { data } = await this.client.get(`${BASE_URL}/search?keyword=${encodeURIComponent(query)}&page=${page}`);
+            // Build the base URL
+            let url = `${BASE_URL}/search?keyword=${encodeURIComponent(query)}&page=${page}`;
+
+            // 🛠️ FIX: Add the advanced filters (like genre) to the URL
+            if (filters.genres) {
+                url += `&genre=${filters.genres}`;
+            }
+
+            const { data } = await this.client.get(url);
             const $ = cheerio.load(data);
             
             res.hasNextPage = $(".pagination > li").last().hasClass("active") ? false : ($(".pagination > li").length > 0);
 
-            // 🛠️ FIX: Removed .tab-content from selector so it doesn't break!
             $(".film_list-wrap .flw-item").each((_, el) => {
                 const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
                 const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
@@ -304,35 +311,6 @@ export class KaidoScraper {
             sub: Number($(el).find(".tick-sub").text().trim()) || 0,
             dub: Number($(el).find(".tick-dub").text().trim()) || 0
         };
-    }
-
-   
-   // ==========================================
-    // 8. ADVANCED SEARCH / FILTER (Fixed using hianime reference)
-    // ==========================================
-    async advancedSearch(genres: string, page: number = 1) {
-        const res = { animes: [] as any[], hasNextPage: false };
-        try {
-            // 🛠️ FIX: HiAnime/Kaido uses the /search endpoint with a blank keyword for filters!
-            const { data } = await this.client.get(`${BASE_URL}/search?keyword=&genre=${genres}&sort=recently_updated&page=${page}`);
-            const $ = cheerio.load(data);
-            
-            res.hasNextPage = $(".pagination > li").last().hasClass("active") ? false : ($(".pagination > li").length > 0);
-
-            // 🛠️ FIX: Using the exact same reliable selector from the search page
-            $("#main-content .tab-content .film_list-wrap .flw-item").each((_, el) => {
-                const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
-                const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
-                const poster = $(el).find(".film-poster .film-poster-img").attr("data-src")?.trim() || "";
-                const type = $(el).find(".film-detail .fd-infor .fdi-item:nth-of-type(1)").text().trim();
-                
-                const sub = Number($(el).find(".film-poster .tick-sub").text().trim().split(" ").pop()) || 0;
-                const dub = Number($(el).find(".film-poster .tick-dub").text().trim().split(" ").pop()) || 0;
-                
-                if (id && name) res.animes.push({ id, name, poster, type, sub, dub });
-            });
-            return res;
-        } catch (err) { throw err; }
     }
 
     
