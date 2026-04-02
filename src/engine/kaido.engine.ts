@@ -268,6 +268,21 @@ export class KaidoScraper {
             const $ = cheerio.load(data);
             const selector = "#ani_detail .container .anis-content";
 
+             try {
+                const syncDataText = $("body").find("#syncData").text();
+                if (syncDataText) {
+                    const syncData = JSON.parse(syncDataText);
+                    res.info.anilistId = Number(syncData.anilist_id) || null;
+                    res.info.malId = Number(syncData.mal_id) || null;
+                } else {
+                    res.info.anilistId = null;
+                    res.info.malId = null;
+                }
+            } catch (err) {
+                res.info.anilistId = null;
+                res.info.malId = null;
+            }
+
             res.info.id = animeId;
             res.info.name = $(selector).find(".anisc-detail .film-name.dynamic-name").text().trim() || "";
             res.info.description = $(selector).find(".anisc-detail .film-description .text").text().split("[").shift()?.trim() || "";
