@@ -22,27 +22,40 @@ export class KaidoScraper {
     async search(query: string, page: number = 1, filters: any = {}) {
         const res = { animes: [] as any[], totalPages: 1, hasNextPage: false };
         try {
-            const useFilterRoute = query.trim() === "" || Object.keys(filters).some(k => filters[k]);
-            const routePath = useFilterRoute ? "/filter" : "/search";
+            // Determine route based on whether we have filters or an empty query
+            const hasFilters = Object.keys(filters).some(k => filters[k] !== "" && filters[k] !== undefined);
+            const routePath = hasFilters || query.trim() === "" ? "/filter" : "/search";
 
             const urlObj = new URL(`${BASE_URL}${routePath}`);
-            urlObj.searchParams.set("keyword", query);
+
+            // 🛠️ CRITICAL FIX: Only attach 'keyword' if it actually has text!
+            // Kaido throws a 500 Server Error if you pass an empty 'keyword=' to /filter
+            if (query.trim() !== "") {
+                urlObj.searchParams.set("keyword", query);
+            }
+
+            // Set Pagination
             urlObj.searchParams.set("page", page.toString());
 
-            // 🛠️ FIX 1: The site expects 'genre' (singular), 'type', 'status', etc.
-            if (filters.genres) urlObj.searchParams.set("genre", filters.genres); 
+            // 🛠️ CRITICAL FIX: Append filters exactly as your DevTools screenshot shows
+            if (filters.genres) urlObj.searchParams.set("genres", filters.genres); 
             if (filters.type) urlObj.searchParams.set("type", filters.type);
             if (filters.status) urlObj.searchParams.set("status", filters.status);
+            if (filters.score) urlObj.searchParams.set("score", filters.score);
+            if (filters.rated) urlObj.searchParams.set("rated", filters.rated);
             if (filters.season) urlObj.searchParams.set("season", filters.season);
             if (filters.language) urlObj.searchParams.set("language", filters.language);
             
-            if (filters.sort) urlObj.searchParams.set("sort", filters.sort);
-            else if (useFilterRoute) urlObj.searchParams.set("sort", "default");
+            // Default sorting for filters to prevent 500 errors
+            if (filters.sort) {
+                urlObj.searchParams.set("sort", filters.sort);
+            } else if (routePath === "/filter") {
+                urlObj.searchParams.set("sort", "default");
+            }
 
-            console.log(`\n[Kaido Scraper] Fetching URL: ${urlObj.href}`);
+            console.log(`[Kaido Scraper] Fetching EXACT URL: ${urlObj.href}`);
 
-            // 🛠️ FIX 2: Do NOT use this.client here! 
-            // We use a fresh axios.get to ensure "X-Requested-With: XMLHttpRequest" is NOT sent.
+            // Fresh axios call without XMLHttpRequest to mimic a real browser
             const { data } = await axios.get(urlObj.href, {
                 headers: {
                     "User-Agent": USER_AGENT,
@@ -52,11 +65,8 @@ export class KaidoScraper {
             });
 
             const $ = cheerio.load(data);
-            
-            // Debugging: Let's see if the page actually loaded items
-            const itemsFound = $(".film_list-wrap .flw-item").length;
-            console.log(`[Kaido Scraper] Found ${itemsFound} anime items on page.`);
 
+            // Extract Total Pages safely
             const totalPagesStr = $('.pagination > .page-item a[title="Last"]')?.attr("href")?.split("=").pop() 
                 ?? $('.pagination > .page-item a[title="Next"]')?.attr("href")?.split("=").pop() 
                 ?? $(".pagination > .page-item.active a")?.text()?.trim() 
@@ -65,6 +75,7 @@ export class KaidoScraper {
             res.totalPages = Number(totalPagesStr) || 1;
             res.hasNextPage = page < res.totalPages;
 
+            // Extract Anime Cards
             $(".film_list-wrap .flw-item").each((_, el) => {
                 const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
                 const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
