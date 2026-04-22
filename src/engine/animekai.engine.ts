@@ -96,7 +96,7 @@ export class AnimeKaiScraper {
         }
     }
 
-    // ==========================================
+  // ==========================================
     // 3. SOURCES & DECRYPTION (MegaUp Extractor)
     // ==========================================
     async getEpisodeSources(episodeData: string, serverName: string = "megaup", category: string = "sub") {
@@ -109,24 +109,21 @@ export class AnimeKaiScraper {
             if (!token) throw new Error("Invalid AnimeKai Episode Token");
 
             // 1. Decrypt Token
-            const ajaxTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(token)}`);
-            const ajaxToken = ajaxTokenRes.data.result;
-            
-            if (!ajaxToken) throw new Error("enc-dec.app API failed to generate token!");
+            let ajaxToken;
+            try {
+                const res = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(token)}`);
+                ajaxToken = res.data.result;
+            } catch (e: any) { throw new Error(`enc-dec.app API failed (Step 1): ${e.message}`); }
 
             // 2. Fetch Servers HTML
-           const { data: rawServerData } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+            let serverHtml;
+            try {
+                const res = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+                const raw = res.data;
+                serverHtml = typeof raw === "string" ? raw : (raw.result?.html || raw.result || raw.html || JSON.stringify(raw));
+            } catch (e: any) { throw new Error(`AnimeKai Server Fetch failed (Step 2): ${e.message}`); }
             
-            // 🛠️ FIX: Safely extract the HTML string out of AnimeKai's JSON wrapper!
-            const serverHtml = typeof rawServerData === "string" 
-                ? rawServerData 
-                : (rawServerData.result?.html || rawServerData.result || rawServerData.html || JSON.stringify(rawServerData));
-            
-            // Check for Cloudflare Block
-            if (serverHtml.includes("Just a moment") || serverHtml.includes("Cloudflare")) {
-                console.error("[AnimeKai] FATAL: Vercel IP blocked by Cloudflare on Server Fetch!");
-                throw new Error("Blocked by Cloudflare");
-            }
+            if (serverHtml.includes("Just a moment") || serverHtml.includes("Cloudflare")) throw new Error("Blocked by Cloudflare on Server Fetch!");
 
             const $ = cheerio.load(serverHtml);
             const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub", "raw"];
@@ -137,32 +134,39 @@ export class AnimeKaiScraper {
                             $(`.lang-group[data-id='${type}'] .server`).first().attr("data-lid");
                 if (serverLid) break; 
             }
-            
+            if (!serverLid) serverLid = $('.server').first().attr('data-lid');
             if (!serverLid) {
-                serverLid = $('.server').first().attr('data-lid');
-            }
-            
-            if (!serverLid) {
-                console.error("[AnimeKai] SERVER HTML DUMP:", serverHtml.substring(0, 500));
-                throw new Error(`No server found for category: ${category}. See logs for HTML dump.`);
+                console.error("[AnimeKai] SERVER HTML DUMP:", serverHtml.substring(0, 300));
+                throw new Error(`No server found for category: ${category}. Token expired.`);
             }
 
             // 3. View the Link
-            const viewTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(serverLid)}`);
-            const { data: viewData } = await this.client.get(`${BASE_URL}/ajax/links/view?id=${serverLid}&_=${viewTokenRes.data.result}`, {
-                headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
-            });
+            let viewData;
+            try {
+                const viewTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(serverLid)}`);
+                const res = await this.client.get(`${BASE_URL}/ajax/links/view?id=${serverLid}&_=${viewTokenRes.data.result}`, {
+                    headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
+                });
+                viewData = res.data;
+            } catch (e: any) { throw new Error(`AnimeKai Link View failed (Step 3): ${e.message}`); }
 
             // 4. Decode Iframe
-            const decIframeRes = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
-            const decoded = decIframeRes.data.result;
+            let decoded;
+            try {
+                const res = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
+                decoded = res.data.result;
+            } catch (e: any) { throw new Error(`Iframe Decode failed (Step 4): ${e.message}`); }
 
             // 5. Decrypt MegaUp Video
-            const megaUrl = decoded.url.replace("/e/", "/media/");
-            const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL } });
-            
-            const decryptMegaRes = await axios.post(`${ENC_API}/dec-mega`, { text: megaData.result, agent: USER_AGENT });
-            const finalData = decryptMegaRes.data.result;
+            let finalData;
+            try {
+                const megaUrl = decoded.url.replace("/e/", "/media/");
+                // 🛠️ FIX: Removed the 'Referer' header here to match original megaup.ts! This usually fixes the 403.
+                const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
+                
+                const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaData.result, agent: USER_AGENT });
+                finalData = res.data.result;
+            } catch (e: any) { throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); }
 
             return {
                 sources: finalData.sources.map((s: any) => ({
