@@ -115,7 +115,12 @@ export class AnimeKaiScraper {
             if (!ajaxToken) throw new Error("enc-dec.app API failed to generate token!");
 
             // 2. Fetch Servers HTML
-            const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+           const { data: rawServerData } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+            
+            // 🛠️ FIX: Safely extract the HTML string out of AnimeKai's JSON wrapper!
+            const serverHtml = typeof rawServerData === "string" 
+                ? rawServerData 
+                : (rawServerData.result?.html || rawServerData.result || rawServerData.html || JSON.stringify(rawServerData));
             
             // Check for Cloudflare Block
             if (serverHtml.includes("Just a moment") || serverHtml.includes("Cloudflare")) {
