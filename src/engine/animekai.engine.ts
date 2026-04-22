@@ -16,7 +16,9 @@ export class AnimeKaiScraper {
             "Sec-Fetch-Site": "same-origin",
             "Pragma": "no-cache",
             "Cache-Control": "no-cache",
-            "Referer": `${BASE_URL}/`
+            "Referer": `${BASE_URL}/`,
+            // 🛠️ FIX: The legendary DDoS-Guard Bypass Trick from Tatakai!
+            "Cookie": "__ddg1_=;__ddg2_=;" 
         }
     });
 
@@ -62,12 +64,7 @@ export class AnimeKaiScraper {
             const $ = cheerio.load(html);
             const aniId = $(".rate-box#anime-rating").attr("data-id");
             
-            if (!aniId) {
-                if (html.includes("Just a moment") || html.includes("Cloudflare")) {
-                    throw new Error("Cloudflare blocked Vercel on Episode List fetch!");
-                }
-                throw new Error("Could not find Anime ID");
-            }
+            if (!aniId) throw new Error("Could not find Anime ID");
 
             const tokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(aniId)}`);
             const episodesToken = tokenRes.data.result;
@@ -96,7 +93,7 @@ export class AnimeKaiScraper {
         }
     }
 
-  // ==========================================
+    // ==========================================
     // 3. SOURCES & DECRYPTION (MegaUp Extractor)
     // ==========================================
     async getEpisodeSources(episodeData: string, serverName: string = "megaup", category: string = "sub") {
@@ -123,8 +120,6 @@ export class AnimeKaiScraper {
                 serverHtml = typeof raw === "string" ? raw : (raw.result?.html || raw.result || raw.html || JSON.stringify(raw));
             } catch (e: any) { throw new Error(`AnimeKai Server Fetch failed (Step 2): ${e.message}`); }
             
-            if (serverHtml.includes("Just a moment") || serverHtml.includes("Cloudflare")) throw new Error("Blocked by Cloudflare on Server Fetch!");
-
             const $ = cheerio.load(serverHtml);
             const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub", "raw"];
             let serverLid = null;
@@ -135,10 +130,7 @@ export class AnimeKaiScraper {
                 if (serverLid) break; 
             }
             if (!serverLid) serverLid = $('.server').first().attr('data-lid');
-            if (!serverLid) {
-                console.error("[AnimeKai] SERVER HTML DUMP:", serverHtml.substring(0, 300));
-                throw new Error(`No server found for category: ${category}. Token expired.`);
-            }
+            if (!serverLid) throw new Error(`No server found for category: ${category}. Token expired.`);
 
             // 3. View the Link
             let viewData;
@@ -160,34 +152,26 @@ export class AnimeKaiScraper {
             // 5. Decrypt MegaUp Video
             let finalData;
             try {
-                // 🛠️ FIX: If the URL is an internal iframe, we must fetch the HTML first!
-                let megaEncryptedString = "";
-
-                if (decoded.url.includes("anikai.to/iframe/")) {
-                    // Fetch the iframe page using standard AnimeKai headers
-                    const iframeRes = await this.client.get(decoded.url, {
-                        headers: { "Referer": `${BASE_URL}/watch/${animeSlug}` }
-                    });
-                    
-                    // The encrypted video string is inside the HTML inside JSON!
-                    // e.g., {"result": "ENCRYPTED_STRING"}
-                    const iframeJson = typeof iframeRes.data === "string" ? JSON.parse(iframeRes.data) : iframeRes.data;
-                    megaEncryptedString = iframeJson.result || iframeRes.data;
-                    
-                } else {
-                    // Fallback for older external MegaUp links
-                    const megaUrl = decoded.url.replace("/e/", "/media/");
-                    const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
-                    megaEncryptedString = megaData.result || megaData;
-                }
+                const megaUrl = decoded.url.replace("/e/", "/media/");
                 
-                // Now we send the encrypted string to the API for decryption
+                // 🛠️ FIX: Added the DDoS-Guard cookies here specifically!
+                const { data: megaData } = await axios.get(megaUrl, { 
+                    headers: { 
+                        "User-Agent": USER_AGENT, 
+                        "Connection": "keep-alive",
+                        "Accept": "application/json, text/javascript, */*; q=0.01",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Cookie": "__ddg1_=;__ddg2_=;",
+                        "Referer": `${BASE_URL}/watch/${animeSlug}`
+                    } 
+                });
+                
+                const megaEncryptedString = megaData.result || megaData;
+                
                 const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaEncryptedString, agent: USER_AGENT });
                 finalData = res.data.result;
+            } catch (e: any) { throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); }
 
-            } catch (e: any) { 
-                throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); 
-            }
             return {
                 sources: finalData.sources.map((s: any) => ({
                     url: s.file,
