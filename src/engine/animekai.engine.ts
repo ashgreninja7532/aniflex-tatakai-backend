@@ -104,13 +104,18 @@ export class AnimeKaiScraper {
             const ajaxToken = ajaxTokenRes.data.result;
 
             // Fetch Servers
-            const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+             const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
             const $ = cheerio.load(serverHtml);
             
-            // 🛠️ FIX: Broader CSS Selectors to catch both AnimeKai layout styles!
-            let serverLid = $(`.server-items.lang-group[data-id='${subOrDub}'] .server`).first().attr("data-lid");
-            if (!serverLid) {
-                serverLid = $(`.lang-group[data-id='${subOrDub}'] .server`).first().attr("data-lid");
+            // 🛠️ FIX: Array of target types to handle both softsub and hardsub!
+            const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub"];
+            let serverLid = null;
+
+            for (const type of targetTypes) {
+                serverLid = $(`.server-items.lang-group[data-id='${type}'] .server`).first().attr("data-lid") ||
+                            $(`.lang-group[data-id='${type}'] .server`).first().attr("data-lid");
+                
+                if (serverLid) break; // Stop looking once we find a valid server
             }
             
             if (!serverLid) throw new Error(`No server found for category: ${category}`);
