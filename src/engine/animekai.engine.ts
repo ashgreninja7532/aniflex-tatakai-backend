@@ -10,6 +10,12 @@ export class AnimeKaiScraper {
         headers: {
             "User-Agent": USER_AGENT,
             "Accept": "text/html, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Pragma": "no-cache",
+            "Cache-Control": "no-cache",
             "Referer": `${BASE_URL}/`
         }
     });
@@ -52,29 +58,31 @@ export class AnimeKaiScraper {
     async getEpisodes(animeSlug: string) {
         const res = { episodes: [] as any[] };
         try {
-            // First, get the internal ani_id
             const { data: html } = await this.client.get(`${BASE_URL}/watch/${animeSlug}`);
             const $ = cheerio.load(html);
             const aniId = $(".rate-box#anime-rating").attr("data-id");
-            if (!aniId) throw new Error("Could not find Anime ID");
+            
+            if (!aniId) {
+                if (html.includes("Just a moment") || html.includes("Cloudflare")) {
+                    throw new Error("Cloudflare blocked Vercel on Episode List fetch!");
+                }
+                throw new Error("Could not find Anime ID");
+            }
 
-            // Generate decryption token
             const tokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(aniId)}`);
             const episodesToken = tokenRes.data.result;
 
-            // Fetch episodes
             const { data: epData } = await this.client.get(`${BASE_URL}/ajax/episodes/list?ani_id=${aniId}&_=${episodesToken}`, {
                 headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
             });
 
-            const $$ = cheerio.load(epData.result);
+            const $$ = cheerio.load(epData.result || epData);
             
             $$("div.eplist > ul > li > a").each((_, el) => {
                 const numAttr = $$(el).attr("num")!;
                 const tokenAttr = $$(el).attr("token")!;
                 
                 res.episodes.push({
-                    // AnimeKai needs the slug, episode number, and token bundled together for sources
                     episodeId: `${animeSlug}$ep=${numAttr}$token=${tokenAttr}`,
                     number: parseInt(numAttr),
                     title: $$(el).children("span").text().trim(),
@@ -82,8 +90,8 @@ export class AnimeKaiScraper {
                 });
             });
             return res;
-        } catch (err) {
-            console.error("[AnimeKai] Episodes Error:", err);
+        } catch (err: any) {
+            console.error("[AnimeKai] Episodes Error:", err.message);
             return res;
         }
     }
@@ -100,37 +108,51 @@ export class AnimeKaiScraper {
 
             if (!token) throw new Error("Invalid AnimeKai Episode Token");
 
+            // 1. Decrypt Token
             const ajaxTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(token)}`);
             const ajaxToken = ajaxTokenRes.data.result;
-
-            // Fetch Servers
-             const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
-            const $ = cheerio.load(serverHtml);
             
-            // 🛠️ FIX: Array of target types to handle both softsub and hardsub!
-            const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub"];
+            if (!ajaxToken) throw new Error("enc-dec.app API failed to generate token!");
+
+            // 2. Fetch Servers HTML
+            const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+            
+            // Check for Cloudflare Block
+            if (serverHtml.includes("Just a moment") || serverHtml.includes("Cloudflare")) {
+                console.error("[AnimeKai] FATAL: Vercel IP blocked by Cloudflare on Server Fetch!");
+                throw new Error("Blocked by Cloudflare");
+            }
+
+            const $ = cheerio.load(serverHtml);
+            const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub", "raw"];
             let serverLid = null;
 
             for (const type of targetTypes) {
                 serverLid = $(`.server-items.lang-group[data-id='${type}'] .server`).first().attr("data-lid") ||
                             $(`.lang-group[data-id='${type}'] .server`).first().attr("data-lid");
-                
-                if (serverLid) break; // Stop looking once we find a valid server
+                if (serverLid) break; 
             }
             
-            if (!serverLid) throw new Error(`No server found for category: ${category}`);
+            if (!serverLid) {
+                serverLid = $('.server').first().attr('data-lid');
+            }
+            
+            if (!serverLid) {
+                console.error("[AnimeKai] SERVER HTML DUMP:", serverHtml.substring(0, 500));
+                throw new Error(`No server found for category: ${category}. See logs for HTML dump.`);
+            }
 
-            // View the Link
+            // 3. View the Link
             const viewTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(serverLid)}`);
             const { data: viewData } = await this.client.get(`${BASE_URL}/ajax/links/view?id=${serverLid}&_=${viewTokenRes.data.result}`, {
                 headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
             });
 
-            // Decode Iframe
+            // 4. Decode Iframe
             const decIframeRes = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
             const decoded = decIframeRes.data.result;
 
-            // Decrypt MegaUp Video
+            // 5. Decrypt MegaUp Video
             const megaUrl = decoded.url.replace("/e/", "/media/");
             const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Referer": BASE_URL } });
             
@@ -153,7 +175,6 @@ export class AnimeKaiScraper {
             };
 
         } catch (err: any) {
-            // 🛠️ FIX: Now throws the actual error message so the router can display it in the browser!
             console.error("[AnimeKai] Sources Error:", err.message);
             throw new Error(err.message); 
         }
