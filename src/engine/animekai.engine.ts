@@ -150,28 +150,40 @@ export class AnimeKaiScraper {
             } catch (e: any) { throw new Error(`Iframe Decode failed (Step 4): ${e.message}`); }
 
             // 5. Decrypt MegaUp Video
-            let finalData;
+             let finalData;
             try {
-                const megaUrl = decoded.url.replace("/e/", "/media/");
-                
-                // 🛠️ FIX: Added the DDoS-Guard cookies here specifically!
-                const { data: megaData } = await axios.get(megaUrl, { 
-                    headers: { 
-                        "User-Agent": USER_AGENT, 
-                        "Connection": "keep-alive",
-                        "Accept": "application/json, text/javascript, */*; q=0.01",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Cookie": "__ddg1_=;__ddg2_=;",
-                        "Referer": `${BASE_URL}/watch/${animeSlug}`
-                    } 
-                });
-                
-                const megaEncryptedString = megaData.result || megaData;
+                let megaEncryptedString = "";
+
+                if (decoded.url.includes("anikai.to/iframe/")) {
+                    // 🛠️ PLAN A: Wrap the failing URL in a free proxy to mask Vercel's datacenter IP!
+                    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(decoded.url)}`;
+                    
+                    // Fetch the iframe using the proxy
+                    const iframeRes = await axios.get(proxiedUrl, {
+                        headers: { 
+                            "User-Agent": USER_AGENT,
+                            "Referer": `${BASE_URL}/watch/${animeSlug}`,
+                            // Keep the fake cookies just in case the proxy passes them through
+                            "Cookie": "__ddg1_=;__ddg2_=;" 
+                        }
+                    });
+                    
+                    const iframeJson = typeof iframeRes.data === "string" ? JSON.parse(iframeRes.data) : iframeRes.data;
+                    megaEncryptedString = iframeJson.result || iframeRes.data;
+                    
+                } else {
+                    const megaUrl = decoded.url.replace("/e/", "/media/");
+                    const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
+                    megaEncryptedString = megaData.result || megaData;
+                }
                 
                 const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaEncryptedString, agent: USER_AGENT });
                 finalData = res.data.result;
-            } catch (e: any) { throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); }
 
+            } catch (e: any) { 
+                throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); 
+            }
+            
             return {
                 sources: finalData.sources.map((s: any) => ({
                     url: s.file,
