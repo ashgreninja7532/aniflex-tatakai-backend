@@ -149,41 +149,48 @@ export class AnimeKaiScraper {
                 decoded = res.data.result;
             } catch (e: any) { throw new Error(`Iframe Decode failed (Step 4): ${e.message}`); }
 
-            // 5. Decrypt MegaUp Video
-             let finalData;
-            try {
-                let megaEncryptedString = "";
-
-                if (decoded.url.includes("anikai.to/iframe/")) {
-                    // 🛠️ PLAN A: Wrap the failing URL in a free proxy to mask Vercel's datacenter IP!
-                    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(decoded.url)}`;
-                    
-                    // Fetch the iframe using the proxy
-                    const iframeRes = await axios.get(proxiedUrl, {
-                        headers: { 
-                            "User-Agent": USER_AGENT,
-                            "Referer": `${BASE_URL}/watch/${animeSlug}`,
-                            // Keep the fake cookies just in case the proxy passes them through
-                            "Cookie": "__ddg1_=;__ddg2_=;" 
-                        }
-                    });
-                    
-                    const iframeJson = typeof iframeRes.data === "string" ? JSON.parse(iframeRes.data) : iframeRes.data;
-                    megaEncryptedString = iframeJson.result || iframeRes.data;
-                    
-                } else {
-                    const megaUrl = decoded.url.replace("/e/", "/media/");
-                    const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
-                    megaEncryptedString = megaData.result || megaData;
-                }
-                
-                const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaEncryptedString, agent: USER_AGENT });
-                finalData = res.data.result;
-
-            } catch (e: any) { 
-                throw new Error(`MegaUp Video Fetch failed (Step 5): ${e.message} - URL: ${decoded?.url}`); 
+         // 5. Check for Iframe Block
+            if (decoded.url.includes("anikai.to/iframe/")) {
+                // 🛠️ PLAN B: The Handoff!
+                // We return a special flag telling the Flutter app to fetch this URL!
+                return {
+                    requiresClientFetch: true,
+                    iframeUrl: decoded.url,
+                    intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
+                    outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] }
+                };
             }
+
+            // Fallback for older external MegaUp links (if any exist)
+            const megaUrl = decoded.url.replace("/e/", "/media/");
+            const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
             
+            const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaData.result || megaData, agent: USER_AGENT });
+            const finalData = res.data.result;
+
+            return {
+                sources: finalData.sources.map((s: any) => ({ url: s.file, type: s.file.includes(".m3u8") ? "hls" : "mp4" })),
+                tracks: finalData.tracks.map((t: any) => ({ file: t.file, label: t.label, kind: t.kind })),
+                intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
+                outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] },
+                headers: { "Referer": BASE_URL }
+            };
+
+        } catch (err: any) {
+            console.error("[AnimeKai] Sources Error:", err.message);
+            throw new Error(err.message); 
+        }
+    }
+
+    // ==========================================
+    // 4. CLIENT DECRYPTOR (For Plan B Handoff)
+    // ==========================================
+    async decryptClientData(encryptedString: string, intro: any, outro: any) {
+        try {
+            // Vercel takes the encrypted string that Flutter fetched and decrypts it
+            const res = await axios.post(`${ENC_API}/dec-mega`, { text: encryptedString, agent: USER_AGENT });
+            const finalData = res.data.result;
+
             return {
                 sources: finalData.sources.map((s: any) => ({
                     url: s.file,
@@ -194,14 +201,13 @@ export class AnimeKaiScraper {
                     label: t.label,
                     kind: t.kind
                 })),
-                intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
-                outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] },
+                intro: intro,
+                outro: outro,
                 headers: { "Referer": BASE_URL }
             };
-
-        } catch (err: any) {
-            console.error("[AnimeKai] Sources Error:", err.message);
-            throw new Error(err.message); 
+        } catch (e: any) {
+            console.error("[AnimeKai] Client Decryption Error:", e.message);
+            throw new Error(`Client Decryption failed: ${e.message}`);
         }
     }
 }
