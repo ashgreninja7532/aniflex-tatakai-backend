@@ -47,4 +47,21 @@ animekaiRouter.get("/episode/sources", async (c) => {
     }
 });
 
+// 4. DECRYPT CLIENT DATA ENDPOINT (Plan B Handoff)
+animekaiRouter.post("/episode/decrypt", async (c) => {
+    try {
+        const body = await c.req.json();
+        
+        if (!body.encryptedData) {
+            return c.json({ error: "Missing encryptedData" }, 400);
+        }
+
+        const res = await animekai.decryptClientData(body.encryptedData, body.intro, body.outro);
+        return c.json({ data: res }, 200);
+    } catch (error: any) {
+        console.error("AnimeKai Decrypt Error:", error);
+        return c.json({ error: "Failed to decrypt client data", details: error.message }, 500);
+    }
+});
+
 export { animekaiRouter };
