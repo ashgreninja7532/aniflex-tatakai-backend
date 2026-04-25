@@ -29,7 +29,18 @@ animekaiRouter.get("/anime/:animeId/episodes", async (c) => {
     }
 });
 
-// 3. SOURCES ENDPOINT
+// 3. SERVERS & CATEGORIES ENDPOINT
+animekaiRouter.get("/episode/servers", async (c) => {
+    const episodeData = decodeURIComponent(c.req.query("animeEpisodeId") || "");
+    try {
+        const res = await animekai.getEpisodeServers(episodeData);
+        return c.json({ data: res }, 200);
+    } catch (error: any) {
+        return c.json({ error: "Failed to fetch servers", details: error.message }, 500);
+    }
+});
+
+// 4. SOURCES ENDPOINT
 animekaiRouter.get("/episode/sources", async (c) => {
     const episodeId = decodeURIComponent(c.req.query("animeEpisodeId") || "");
     const server = decodeURIComponent(c.req.query("server") || "vidstreaming");
@@ -47,7 +58,7 @@ animekaiRouter.get("/episode/sources", async (c) => {
     }
 });
 
-// 4. DECRYPT CLIENT DATA ENDPOINT (Plan B Handoff)
+// 5. DECRYPT CLIENT DATA ENDPOINT (Plan B Handoff)
 animekaiRouter.post("/episode/decrypt", async (c) => {
     try {
         const body = await c.req.json();
