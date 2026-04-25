@@ -93,95 +93,50 @@ export class AnimeKaiScraper {
         }
     }
 
+   // ==========================================
+    // 3. GET AVAILABLE SERVERS & CATEGORIES
     // ==========================================
-    // 3. SOURCES & DECRYPTION (MegaUp Extractor)
-    // ==========================================
-    async getEpisodeSources(episodeData: string, serverName: string = "megaup", category: string = "sub") {
+    async getEpisodeServers(episodeData: string) {
         try {
-            const subOrDub = category === "dub" ? "dub" : "softsub";
             const parts = episodeData.split("$ep=");
             const animeSlug = parts[0];
             const token = parts[1]?.split("$token=")[1];
 
             if (!token) throw new Error("Invalid AnimeKai Episode Token");
 
-            // 1. Decrypt Token
-            let ajaxToken;
-            try {
-                const res = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(token)}`);
-                ajaxToken = res.data.result;
-            } catch (e: any) { throw new Error(`enc-dec.app API failed (Step 1): ${e.message}`); }
+            const ajaxTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(token)}`);
+            const ajaxToken = ajaxTokenRes.data.result;
 
-            // 2. Fetch Servers HTML
-            let serverHtml;
-            try {
-                const res = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
-                const raw = res.data;
-                serverHtml = typeof raw === "string" ? raw : (raw.result?.html || raw.result || raw.html || JSON.stringify(raw));
-            } catch (e: any) { throw new Error(`AnimeKai Server Fetch failed (Step 2): ${e.message}`); }
+            const { data: serverHtml } = await this.client.get(`${BASE_URL}/ajax/links/list?token=${token}&_=${ajaxToken}`);
+            const raw = serverHtml;
+            const htmlStr = typeof raw === "string" ? raw : (raw.result?.html || raw.result || raw.html || JSON.stringify(raw));
+
+            const $ = cheerio.load(htmlStr);
             
-            const $ = cheerio.load(serverHtml);
-            const targetTypes = category === "dub" ? ["dub"] : ["softsub", "sub", "raw"];
-            let serverLid = null;
+            const res = { softsub: [] as any[], sub: [] as any[], dub: [] as any[] };
 
-            for (const type of targetTypes) {
-                serverLid = $(`.server-items.lang-group[data-id='${type}'] .server`).first().attr("data-lid") ||
-                            $(`.lang-group[data-id='${type}'] .server`).first().attr("data-lid");
-                if (serverLid) break; 
-            }
-            if (!serverLid) serverLid = $('.server').first().attr('data-lid');
-            if (!serverLid) throw new Error(`No server found for category: ${category}. Token expired.`);
+            // Find Soft Sub (VTT)
+            $(`.server-items.lang-group[data-id='softsub'] .server, .lang-group[data-id='softsub'] .server`).each((_, el) => {
+                res.softsub.push({ serverName: $(el).text().trim().toLowerCase(), serverId: $(el).attr("data-lid") });
+            });
 
-            // 3. View the Link
-            let viewData;
-            try {
-                const viewTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(serverLid)}`);
-                const res = await this.client.get(`${BASE_URL}/ajax/links/view?id=${serverLid}&_=${viewTokenRes.data.result}`, {
-                    headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
-                });
-                viewData = res.data;
-            } catch (e: any) { throw new Error(`AnimeKai Link View failed (Step 3): ${e.message}`); }
+            // Find Hard Sub (Painted on video)
+            $(`.server-items.lang-group[data-id='sub'] .server, .lang-group[data-id='sub'] .server`).each((_, el) => {
+                res.sub.push({ serverName: $(el).text().trim().toLowerCase(), serverId: $(el).attr("data-lid") });
+            });
 
-            // 4. Decode Iframe
-            let decoded;
-            try {
-                const res = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
-                decoded = res.data.result;
-            } catch (e: any) { throw new Error(`Iframe Decode failed (Step 4): ${e.message}`); }
+            // Find Dub (English Audio)
+            $(`.server-items.lang-group[data-id='dub'] .server, .lang-group[data-id='dub'] .server`).each((_, el) => {
+                res.dub.push({ serverName: $(el).text().trim().toLowerCase(), serverId: $(el).attr("data-lid") });
+            });
 
-         // 5. Check for Iframe Block
-            if (decoded.url.includes("anikai.to/iframe/")) {
-                // 🛠️ PLAN B: The Handoff!
-                // We return a special flag telling the Flutter app to fetch this URL!
-                return {
-                    requiresClientFetch: true,
-                    iframeUrl: decoded.url,
-                    intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
-                    outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] }
-                };
-            }
-
-            // Fallback for older external MegaUp links (if any exist)
-            const megaUrl = decoded.url.replace("/e/", "/media/");
-            const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
-            
-            const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaData.result || megaData, agent: USER_AGENT });
-            const finalData = res.data.result;
-
-            return {
-                sources: finalData.sources.map((s: any) => ({ url: s.file, type: s.file.includes(".m3u8") ? "hls" : "mp4" })),
-                tracks: finalData.tracks.map((t: any) => ({ file: t.file, label: t.label, kind: t.kind })),
-                intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
-                outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] },
-                headers: { "Referer": BASE_URL }
-            };
-
+            return res;
         } catch (err: any) {
-            console.error("[AnimeKai] Sources Error:", err.message);
-            throw new Error(err.message); 
+            console.error("[AnimeKai] Servers Error:", err.message);
+            throw new Error(err.message);
         }
     }
-
+    
     // ==========================================
     // 4. CLIENT DECRYPTOR (For Plan B Handoff)
     // ==========================================
