@@ -314,14 +314,14 @@ export class AnimeKaiScraper {
                     intro, outro, headers: { "Referer": BASE_URL }
                 };
             } 
-            else if (videoUrl.includes("/iframe/")) {
+            else if (videoUrl.includes("animekai.la/iframe/")) {
                 // 🛠️ FIX: Hand it off to the Flutter app to solve Cloudflare!
                 return {
                     requiresClientFetch: true,
                     iframeUrl: videoUrl,
                     intro,
                     outro,
-                    headers: { "Referer": "https://anikai.to/" }
+                    headers: { "Referer": "https://animekai.la/" }
                 };
             }
 
