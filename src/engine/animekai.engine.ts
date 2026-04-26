@@ -255,10 +255,10 @@ export class AnimeKaiScraper {
         } catch (err: any) { throw new Error(err.message); }
     }
 
-   // ==========================================
+  // ==========================================
     // 6. SOURCES & DECRYPTION
     // ==========================================
-    async getEpisodeSources(episodeData: string, serverName: string = "server 1", category: string = "softsub") {
+    async getEpisodeSources(episodeData: string, serverName: string = "server 1", category: string = "sub") {
         try {
             const parts = episodeData.split("$ep=");
             const animeSlug = parts[0];
@@ -275,53 +275,73 @@ export class AnimeKaiScraper {
             
             // 1. MATCH EXACT SERVER NAME
             $(`.lang-group[data-id='${category}'] .server`).each((_, el) => {
-                if ($(el).text().trim().toLowerCase() === serverName.toLowerCase()) {
+                if ($(el).text().trim().toLowerCase().includes(serverName.toLowerCase())) {
                     serverLid = $(el).attr("data-lid");
                 }
             });
 
-            // 2. FALLBACK TO FIRST SERVER
-            if (!serverLid) {
-                serverLid = $(`.lang-group[data-id='${category}'] .server`).first().attr("data-lid");
-            }
-            // 3. FALLBACK TO ANY SERVER IN THE LIST
-            if (!serverLid) {
-                serverLid = $('.server').first().attr('data-lid');
-            }
+            // 2. FALLBACKS
+            if (!serverLid) serverLid = $(`.lang-group[data-id='${category}'] .server`).first().attr("data-lid");
+            if (!serverLid) serverLid = $('.server').first().attr('data-lid');
             if (!serverLid) throw new Error(`No server found for category: ${category}`);
 
+            // 3. GET VIEW TOKEN
             const viewTokenRes = await axios.get(`${ENC_API}/enc-kai?text=${encodeURIComponent(serverLid)}`);
             const { data: viewData } = await this.client.get(`${BASE_URL}/ajax/links/view?id=${serverLid}&_=${viewTokenRes.data.result}`, {
                 headers: { "X-Requested-With": "XMLHttpRequest", "Referer": `${BASE_URL}/watch/${animeSlug}` }
             });
 
+            // 4. DECODE URL
             const decIframeRes = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
             const decoded = decIframeRes.data.result;
 
-            // 4. IFRAME DETECTION (Fixes domain changes like anikai.to)
-            if (decoded.url.includes("animekai.la/iframe/")) {
+            const intro = { start: decoded.skip.intro[0], end: decoded.skip.intro[1] };
+            const outro = { start: decoded.skip.outro[0], end: decoded.skip.outro[1] };
+
+            // 5. MEGAUP EXTRACTION (TATAKAI API LOGIC)
+            const videoUrl = decoded.url;
+            
+            if (videoUrl.includes("/e/")) {
+                const megaUrl = videoUrl.replace("/e/", "/media/");
+                
+                // Fetch the media data from MegaUp
+                const { data: megaData } = await axios.get(megaUrl, { 
+                    headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } 
+                });
+                
+                // Ensure we pass the correct text to the decryptor
+                const textToDec = typeof megaData === 'object' ? (megaData.result || JSON.stringify(megaData)) : megaData;
+
+                const res = await axios.post(`${ENC_API}/dec-mega`, { 
+                    text: textToDec, 
+                    agent: USER_AGENT 
+                });
+                
+                const finalData = res.data.result;
+
                 return {
-                    requiresClientFetch: true,
-                    iframeUrl: decoded.url,
-                    intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
-                    outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] }
+                    sources: finalData.sources.map((s: any) => ({ 
+                        quality: s.file.includes("1080") ? "1080p" : "Auto", 
+                        url: s.file, 
+                        type: s.file.includes(".m3u8") || s.file.endsWith("m3u8") ? "hls" : "mp4" 
+                    })),
+                    tracks: finalData.tracks?.map((t: any) => ({ 
+                        file: t.file, 
+                        label: t.label, 
+                        kind: t.kind 
+                    })) || [],
+                    intro,
+                    outro,
+                    headers: { "Referer": BASE_URL }
                 };
+            } 
+            else if (videoUrl.includes("/iframe/")) {
+                // If it hits the Cloudflare iframe, fail immediately so the app can auto-switch to a working MegaUp server!
+                throw new Error("Cloudflare Iframe detected. Switch to 'SUB' or 'DUB' category.");
             }
 
-            // 5. EXTERNAL SERVER EXTRACTION (Megaup/Hardsub)
-            const megaUrl = decoded.url.replace("/e/", "/media/");
-            const { data: megaData } = await axios.get(megaUrl, { headers: { "User-Agent": USER_AGENT, "Connection": "keep-alive" } });
-            
-            const res = await axios.post(`${ENC_API}/dec-mega`, { text: megaData.result || megaData, agent: USER_AGENT });
-            const finalData = res.data.result;
+            throw new Error(`Unknown video host: ${videoUrl}`);
 
-            return {
-                sources: finalData.sources.map((s: any) => ({ quality: s.file.includes("1080") ? "1080p" : "Auto", url: s.file, type: s.file.includes(".m3u8") ? "hls" : "mp4" })),
-                tracks: finalData.tracks?.map((t: any) => ({ file: t.file, label: t.label, kind: t.kind })) || [],
-                intro: { start: decoded.skip.intro[0], end: decoded.skip.intro[1] },
-                outro: { start: decoded.skip.outro[0], end: decoded.skip.outro[1] },
-                headers: { "Referer": BASE_URL }
-            };
         } catch (err: any) { throw new Error(err.message); }
     }
 }
