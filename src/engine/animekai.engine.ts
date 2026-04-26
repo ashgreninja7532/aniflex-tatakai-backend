@@ -1,7 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 
-const BASE_URL = "https://anikai.to";
+const BASE_URL = "https://animekai.la";
 const ENC_API = "https://enc-dec.app/api";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
@@ -281,7 +281,7 @@ export class AnimeKaiScraper {
             const decIframeRes = await axios.post(`${ENC_API}/dec-kai`, { text: viewData.result });
             const decoded = decIframeRes.data.result;
 
-            if (decoded.url.includes("anikai.to/iframe/")) {
+            if (decoded.url.includes("animekai.la/iframe/")) {
                 return {
                     requiresClientFetch: true,
                     iframeUrl: decoded.url,
