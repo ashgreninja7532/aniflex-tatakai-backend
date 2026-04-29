@@ -16,7 +16,7 @@ export class AnikotoScraper {
         }
     });
 
-    // ==========================================
+   // ==========================================
     // 1. SEARCH & FILTER
     // ==========================================
     async search(query: string, page: number = 1, filters: any = {}) {
@@ -52,18 +52,23 @@ export class AnikotoScraper {
             res.hasNextPage = page < res.totalPages;
 
             $(".film_list-wrap .flw-item").each((_, el) => {
-                const id = $(el).find(".film-detail .film-name .dynamic-name").attr("href")?.slice(1).split("?")[0] || "";
-                const name = $(el).find(".film-detail .film-name .dynamic-name").text().trim();
-                const poster = $(el).find(".film-poster .film-poster-img").attr("data-src")?.trim() || "";
-                const type = $(el).find(".film-detail .fd-infor .fdi-item:nth-of-type(1)").text().trim() || "TV";
+                // 🛠️ FIX: Bulletproof ID and Image extraction
+                const aTag = $(el).find(".dynamic-name");
+                const href = aTag.attr("href") || "";
+                const id = href.split('/').pop()?.split('?')[0] || ""; // Grabs the last part safely
                 
-                const epsText = $(el).find(".film-poster .tick-eps").text().trim().split(" ").pop();
-                const subText = $(el).find(".film-poster .tick-sub").text().trim().split(" ").pop();
-                const dubText = $(el).find(".film-poster .tick-dub").text().trim().split(" ").pop();
+                const name = aTag.text().trim();
+                const imgTag = $(el).find(".film-poster-img");
+                const poster = imgTag.attr("data-src") || imgTag.attr("src") || "";
+                const type = $(el).find(".fdi-item").first().text().trim() || "TV";
+                
+                const epsText = $(el).find(".tick-eps").text().trim().split(" ").pop();
+                const subText = $(el).find(".tick-sub").text().trim().split(" ").pop();
+                const dubText = $(el).find(".tick-dub").text().trim().split(" ").pop();
                 
                 const sub = Number(subText) || 0;
                 const dub = Number(dubText) || 0;
-                const episodes = Number(epsText) || sub || 0; 
+                const episodes = Number(epsText) || Math.max(sub, dub) || 0; 
                 
                 if (id && name) res.animes.push({ id, name, poster, type, episodes, sub, dub });
             });
@@ -71,32 +76,39 @@ export class AnikotoScraper {
         } catch (err: any) { throw err; }
     }
 
-    // ==========================================
+  // ==========================================
     // 2. HOME PAGE
     // ==========================================
     async getHomePage() {
         const res = { spotlightAnimes: [] as any[], trendingAnimes: [] as any[], topMovies: [] as any[], latestEpisodeAnimes: [] as any[], mostPopularAnimes: [] as any[] };
         try {
-            const { data } = await this.client.get(`${BASE_URL}/home`);
+            // 🛠️ FIX: Anikoto uses the root "/", not "/home"
+            const { data } = await this.client.get(`${BASE_URL}/`);
             const $ = cheerio.load(data);
 
             $("#slider .swiper-wrapper .swiper-slide").each((_, el) => {
+                const href = $(el).find(".desi-buttons a").last().attr("href") || "";
+                const id = href.split('/').pop()?.split('?')[0] || "";
+                const imgTag = $(el).find(".film-poster-img");
+
                 res.spotlightAnimes.push({
-                    id: $(el).find(".desi-buttons a").last().attr("href")?.slice(1)?.trim() || "",
+                    id: id,
                     name: $(el).find(".desi-head-title.dynamic-name").text().trim(),
                     description: $(el).find(".desi-description").text().split("[").shift()?.trim() || "",
-                    poster: $(el).find(".film-poster-img").attr("data-src")?.trim() || "",
-                    episodes: Number($(el).find(".sc-detail .scd-item .tick-item.tick-eps").text().trim()) || 0,
-                    sub: Number($(el).find(".sc-detail .scd-item .tick-item.tick-sub").text().trim()) || 0,
-                    dub: Number($(el).find(".sc-detail .scd-item .tick-item.tick-dub").text().trim()) || 0,
+                    poster: imgTag.attr("data-src") || imgTag.attr("src") || "",
+                    episodes: Number($(el).find(".sc-detail .tick-eps").text().trim()) || 0,
+                    sub: Number($(el).find(".sc-detail .tick-sub").text().trim()) || 0,
+                    dub: Number($(el).find(".sc-detail .tick-dub").text().trim()) || 0,
                 });
             });
 
             $("#trending-home .swiper-wrapper .swiper-slide").each((_, el) => {
+                const href = $(el).find(".film-poster").attr("href") || "";
+                const imgTag = $(el).find(".film-poster-img");
                 res.trendingAnimes.push({
-                    id: $(el).find(".film-poster").attr("href")?.slice(1)?.trim() || "",
+                    id: href.split('/').pop()?.split('?')[0] || "",
                     name: $(el).find(".film-title.dynamic-name").text().trim(),
-                    poster: $(el).find(".film-poster-img").attr("data-src")?.trim() || "",
+                    poster: imgTag.attr("data-src") || imgTag.attr("src") || "",
                     episodes: 0, sub: 0, dub: 0
                 });
             });
@@ -108,16 +120,21 @@ export class AnikotoScraper {
                 res.mostPopularAnimes.push(this._extractTrendingCard($, el));
             });
 
-            const movieRes = await this.client.get(`${BASE_URL}/movie`);
-            const $m = cheerio.load(movieRes.data);
-            $m("#main-content .tab-content .film_list-wrap .flw-item").slice(0, 10).each((_, el) => {
-                res.topMovies.push(this._extractAnimeCard($m, el));
-            });
+            // 🛠️ FIX: Wrap the movies fetch in a try-catch so it doesn't crash the whole homepage if it fails
+            try {
+                const movieRes = await this.client.get(`${BASE_URL}/movie`);
+                const $m = cheerio.load(movieRes.data);
+                $m(".film_list-wrap .flw-item").slice(0, 10).each((_, el) => {
+                    res.topMovies.push(this._extractAnimeCard($m, el));
+                });
+            } catch (e) {
+                console.log("Failed to fetch top movies, skipping.");
+            }
 
             return res;
         } catch (err) { throw err; }
     }
-
+    
     // ==========================================
     // 3. ANIME INFO
     // ==========================================
@@ -308,31 +325,34 @@ export class AnikotoScraper {
 
     // --- INTERNAL SCRAPING HELPERS ---
     private _extractAnimeCard($: any, el: any) {
-        const epsText = $(el).find(".tick-eps").text().trim().split(" ").pop();
-        const subText = $(el).find(".tick-sub").text().trim().split(" ").pop();
-        const dubText = $(el).find(".tick-dub").text().trim().split(" ").pop();
+        const href = $(el).find(".dynamic-name").attr("href") || "";
+        const id = href.split('/').pop()?.split('?')[0] || "";
+        const imgTag = $(el).find(".film-poster-img");
 
-        const sub = Number(subText) || 0;
-        const dub = Number(dubText) || 0;
-        const episodes = Number(epsText) || sub || 0;
+        const sub = Number($(el).find(".tick-sub").text().trim().split(" ").pop()) || 0;
+        const dub = Number($(el).find(".tick-dub").text().trim().split(" ").pop()) || 0;
 
         return {
-            id: $(el).find(".dynamic-name").attr("href")?.slice(1).split("?")[0] || "",
+            id: id,
             name: $(el).find(".dynamic-name").text().trim(),
-            poster: $(el).find(".film-poster-img").attr("data-src")?.trim() || "",
-            type: $(el).find(".fdi-item:nth-of-type(1)").text().trim() || "TV",
-            episodes: episodes, sub, dub
+            poster: imgTag.attr("data-src") || imgTag.attr("src") || "",
+            type: $(el).find(".fdi-item").first().text().trim() || "TV",
+            episodes: Number($(el).find(".tick-eps").text().trim().split(" ").pop()) || Math.max(sub, dub) || 0, 
+            sub, dub
         };
     }
 
     private _extractTrendingCard($: any, el: any) {
+        const href = $(el).find(".dynamic-name").attr("href") || "";
+        const id = href.split('/').pop()?.split('?')[0] || "";
+        const imgTag = $(el).find(".film-poster-img");
+
         return {
-            id: $(el).find(".dynamic-name").attr("href")?.slice(1).trim() || "",
+            id: id,
             name: $(el).find(".dynamic-name").text().trim(),
-            poster: $(el).find(".film-poster-img").attr("data-src")?.trim() || "",
+            poster: imgTag.attr("data-src") || imgTag.attr("src") || "",
             episodes: Number($(el).find(".tick-eps").text().trim().split(" ").pop()) || 0,
             sub: Number($(el).find(".tick-sub").text().trim().split(" ").pop()) || 0,
             dub: Number($(el).find(".tick-dub").text().trim().split(" ").pop()) || 0
         };
     }
-}
