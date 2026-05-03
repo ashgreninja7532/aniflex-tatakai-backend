@@ -159,33 +159,47 @@ export class AnimepaheScraper {
         } catch { return []; }
     }
 
-    async getSources(animeId: string, episodeSession: string) {
+   async getSources(animeId: string, episodeSession: string) {
         const sources = [];
         try {
             const res = await fetch(`${BASE_URL}/play/${animeId}/${episodeSession}`, { headers: this.headers });
             const $ = cheerio.load(await res.text());
             
             const buttons = $("div#resolutionMenu > button").toArray();
+            const downloadLinks = $("div#pickDownload > a").toArray(); // We need this for the fallback!
+
             for (let i = 0; i < buttons.length; i++) {
                 const btn = $(buttons[i]);
                 const audio = btn.attr("data-audio") ?? "unknown";
                 const kwikLink = btn.attr("data-src") ?? "";
                 const quality = btn.attr("data-resolution") ?? "unknown";
+                const paheWinLink = $(downloadLinks[i]).attr("href") ?? ""; // Download link
 
                 if (kwikLink) {
+                    let directUrl = "";
                     try {
-                        const directUrl = await this.extractDirect(kwikLink);
-                        if (directUrl) {
-                            sources.push({
-                                quality,
-                                audio,
-                                url: directUrl,
-                                isM3U8: directUrl.includes(".m3u8"),
-                                originalKwik: kwikLink
-                            });
-                        }
+                        // Attempt 1: Standard Unpacking (Fails if Cloudflare is active)
+                        directUrl = await this.extractDirect(kwikLink);
                     } catch (e) {
-                        // Kwik extraction failed for this quality
+                        // Attempt 2: HLS Form Decryption (Bypasses Cloudflare)
+                        if (paheWinLink) {
+                            try {
+                                const originalRes = await fetch(kwikLink, { headers: this.headers });
+                                directUrl = await this.extractHls(paheWinLink, originalRes);
+                            } catch (hlsError) {
+                                console.log(`Fallback failed for ${quality}p:`, hlsError);
+                            }
+                        }
+                    }
+
+                    if (directUrl) {
+                        sources.push({
+                            quality,
+                            audio,
+                            url: directUrl,
+                            isM3U8: directUrl.includes(".m3u8"),
+                            originalKwik: kwikLink
+                        });
                     }
                 }
             }
@@ -204,7 +218,7 @@ export class AnimepaheScraper {
             if (content.includes("eval(function")) packedScript = content;
         });
 
-        if (!packedScript) throw new Error("No packed script found");
+        if (!packedScript) throw new Error("No packed script found (Likely Cloudflare blocked)");
 
         const scriptPart = substringAfterLast(packedScript, "eval(function(");
         const unpacked = unpackJsAndCombine("eval(function(" + scriptPart);
@@ -212,5 +226,59 @@ export class AnimepaheScraper {
 
         if (!videoUrl) throw new Error("Failed to extract URL");
         return videoUrl;
+    }
+
+    private async extractHls(paheWinLink: string, originalRes: Response): Promise<string> {
+        // 1. Hit the download redirect link to bypass embed Cloudflare
+        const kwikHeadersRes = await fetch(`${paheWinLink}/i`, {
+            redirect: "manual", // Prevent auto-following so we can grab the location
+            headers: { Referer: BASE_URL },
+        });
+
+        const location = kwikHeadersRes.headers.get("location");
+        if (!location) throw new Error("Failed to get redirect location");
+
+        const kwikUrl = location.startsWith("http") ? location : `https://${location.split("://").pop()}`;
+        
+        // 2. Fetch the actual Kwik page
+        const kwikRes = await fetch(kwikUrl, { headers: { Referer: "https://kwik.cx/" } });
+        const kwikBody = await kwikRes.text();
+
+        // 3. Find the encrypted token required to unlock the M3U8
+        const tokenRegex = /"(\S+)",\d+,"(\S+)",(\d+),(\d+)/;
+        const matches = kwikBody.match(tokenRegex);
+        if (!matches || matches.length < 5) throw new Error("Failed to extract token parts");
+
+        // 4. Decrypt the hidden form
+        const formHtml = decrypt(matches[1]!, matches[2]!, matches[3]!, parseInt(matches[4]!, 10));
+        const actionUrl = formHtml.match(/action="([^"]+)"/)?.[1];
+        const token = formHtml.match(/value="([^"]+)"/)?.[1];
+
+        if (!actionUrl || !token) throw new Error("Failed to extract action/token");
+
+        // 5. Build cookies
+        const cookie1 = originalRes.headers.get("set-cookie") || "";
+        const cookie2 = kwikRes.headers.get("set-cookie") || "";
+        const combinedCookie = `${cookie1}; ${cookie2.replace("path=/;", "")}`;
+
+        // 6. Post the decrypted token back to Kwik
+        const postRes = await fetch(actionUrl, {
+            method: "POST",
+            redirect: "manual",
+            headers: {
+                Referer: kwikRes.url,
+                Cookie: combinedCookie,
+                "User-Agent": USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({ _token: token }).toString(),
+        });
+
+        // 7. Kwik surrenders and redirects us to the vault-05.uwucdn.top M3U8 link!
+        if (postRes.status === 302 || postRes.status === 301) {
+            return postRes.headers.get("location") || "";
+        }
+        
+        throw new Error("HLS extraction failed, no redirect");
     }
 }
