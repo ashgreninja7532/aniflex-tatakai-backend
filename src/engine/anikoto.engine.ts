@@ -50,12 +50,11 @@ export class AnikotoScraper {
                 res.totalPages = Number(totalPagesStr) || 1;
                 res.hasNextPage = page < res.totalPages;
 
-                $(".film_list-wrap .flw-item").each((_, el) => {
+                $(".film_list-wrap .flw-item").each((_: any, el: any) => {
                     const card = this._extractAnimeCard($, el);
                     if (card.id && card.name) res.animes.push(card);
                 });
             };
-
             parseData($);
 
             // 💡 Fallback: If Anikoto hid the items behind an AJAX call, we fetch them directly!
@@ -337,3 +336,19 @@ export class AnikotoScraper {
             sub, dub
         };
     }
+
+    private _extractTrendingCard($: any, el: any) {
+        const href = $(el).find(".dynamic-name").attr("href") || "";
+        const id = href.split('/').pop()?.split('?')[0] || "";
+        const imgTag = $(el).find(".film-poster-img");
+
+        return {
+            id: id,
+            name: $(el).find(".dynamic-name").text().trim() || imgTag.attr("alt") || "",
+            poster: imgTag.attr("data-src") || imgTag.attr("src") || "",
+            episodes: Number($(el).find(".tick-eps").text().trim().split(" ").pop()) || 0,
+            sub: Number($(el).find(".tick-sub").text().trim().split(" ").pop()) || 0,
+            dub: Number($(el).find(".tick-dub").text().trim().split(" ").pop()) || 0
+        };
+    }
+}
