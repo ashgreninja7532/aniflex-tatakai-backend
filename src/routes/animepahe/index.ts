@@ -52,7 +52,6 @@ animepaheRouter.get("/anime/:animeId/episodes", async (c) => {
 
 // 5. SOURCES (Stream Links)
 animepaheRouter.get("/episode/sources", async (c) => {
-    // Note: Animepahe requires both the Anime ID and the Episode Session ID
     const animeId = decodeURIComponent(c.req.query("animeId") || "");
     const session = decodeURIComponent(c.req.query("session") || "");
 
@@ -64,8 +63,9 @@ animepaheRouter.get("/episode/sources", async (c) => {
         const res = await animepahe.getSources(animeId, session);
         return c.json({ 
             data: { 
-                sources: res,
-                headers: { "Referer": "https://kwik.cx/" } 
+                sources: res.sources,
+                headers: { "Referer": "https://kwik.cx/" },
+                debug_logs: res.debugLogs // 👀 We will see exactly what happens!
             } 
         }, 200);
     } catch (error: any) {
