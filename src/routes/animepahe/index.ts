@@ -73,4 +73,24 @@ animepaheRouter.get("/episode/sources", async (c) => {
     }
 });
 
+// 6. THE DYNAMIC MATCHER ENDPOINT
+animepaheRouter.post("/map", async (c) => {
+    try {
+        const body = await c.req.json();
+        const anilistId = body.anilistId;
+        const titles = body.titles || [];
+        const year = body.year || 0;
+
+        if (!anilistId || titles.length === 0) {
+            return c.json({ error: "Missing anilistId or titles" }, 400);
+        }
+
+        const mappedId = await animepahe.findMapping(anilistId, titles, year);
+        
+        return c.json({ data: { mappedId } }, 200);
+    } catch (error: any) {
+        return c.json({ error: "Mapping failed", details: error.message }, 500);
+    }
+});
+
 export { animepaheRouter };
