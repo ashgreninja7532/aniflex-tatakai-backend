@@ -1,11 +1,13 @@
 import * as cheerio from "cheerio";
-import stringSimilarity from "string-similarity"; // Already in your package.json!
+import stringSimilarity from "string-similarity";
 
 const BASE_URL = "https://animepahe.pw";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const DDOS_GUARD_HEADERS = { Cookie: "__ddg1_=;__ddg2_=;" };
 
-// ... (Keep ALL the Utilities & Unpackers exactly as they were in the previous code)
+// ==========================================
+// UTILITIES & UNPACKERS
+// ==========================================
 const substringBefore = (str: string, pat: string) => str.indexOf(pat) === -1 ? str : str.substring(0, str.indexOf(pat));
 const substringAfter = (str: string, pat: string) => str.indexOf(pat) === -1 ? str : str.substring(str.indexOf(pat) + pat.length);
 const substringAfterLast = (str: string, pat: string) => str.split(pat).pop() ?? "";
@@ -58,7 +60,9 @@ function unpackJsAndCombine(packedJS: string): string {
     });
 }
 
-
+// ==========================================
+// CORE SCRAPER ENGINE
+// ==========================================
 export class AnimepaheScraper {
     private headers = { ...DDOS_GUARD_HEADERS };
 
@@ -96,7 +100,6 @@ export class AnimepaheScraper {
         } catch { return []; }
     }
 
-    // 🛠️ FIX: Deep Scrape of Info Page for accurate details!
     async getAnimeInfo(id: string) {
         try {
             const res = await fetch(`${BASE_URL}/anime/${id}`, { headers: this.headers });
@@ -113,7 +116,6 @@ export class AnimepaheScraper {
                 if (href.includes("anilist.co/anime/")) anilist_id = Number(href.match(/anime\/(\d+)/)?.[1]);
             });
 
-            // Extract text from the <p> tags in .anime-info
             let type = "TV", episodes = 0, status = "", aired = "", season = "", duration = "", studios = "";
             $(".anime-info p").each((_, el) => {
                 const text = $(el).text().trim();
@@ -134,15 +136,14 @@ export class AnimepaheScraper {
                 background: $("div.anime-cover").attr("data-src")?.trim() || null,
                 genres: $(".anime-genre li").map((_, el) => $(el).text().trim()).get(),
                 type, episodes, status, aired, season, duration, studios: studios.split(", "),
-                externalLinks, mal_id, anilistId: anilist_id // We use anilistId for matching!
+                externalLinks, mal_id, anilistId: anilist_id 
             };
         } catch { return null; }
     }
 
-    // 🛠️ NEW: THE DYNAMIC MATCHER ALGORITHM
+    // 🚀 DYNAMIC MATCHER
     async findMapping(anilistId: number, titles: string[], year: number) {
         try {
-            // 1. Compile all potential search results from different titles (Romaji, English)
             let searchResults: any[] = [];
             for (const title of titles) {
                 if (!title) continue;
@@ -150,34 +151,29 @@ export class AnimepaheScraper {
                 searchResults.push(...results);
             }
 
-            // Remove duplicates by session ID
             searchResults = searchResults.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
-            // 2. Filter by Year if available to narrow down
             if (year > 0) {
                 const yearFiltered = searchResults.filter(r => r.year === year);
                 if (yearFiltered.length > 0) searchResults = yearFiltered; 
             }
 
-            // 3. Take the Top 3 closest matches via String Similarity to save server time
             const primaryTitle = titles[0] || "";
             searchResults.sort((a, b) => {
                 const simA = stringSimilarity.compareTwoStrings(primaryTitle.toLowerCase(), a.title.toLowerCase());
                 const simB = stringSimilarity.compareTwoStrings(primaryTitle.toLowerCase(), b.title.toLowerCase());
-                return simB - simA; // Highest similarity first
+                return simB - simA; 
             });
 
             const topResults = searchResults.slice(0, 3);
 
-            // 4. Verify against the Info page's External Links
             for (const result of topResults) {
                 const info = await this.getAnimeInfo(result.id);
                 if (info && info.anilistId === anilistId) {
-                    return result.id; // PERFECT MATCH FOUND!
+                    return result.id; // PERFECT MATCH FOUND
                 }
             }
-
-            return null; // No match found on AnimePahe
+            return null; 
         } catch (e) {
             console.error("Mapping error:", e);
             return null;
@@ -189,7 +185,9 @@ export class AnimepaheScraper {
             const firstPageRes = await fetch(`${BASE_URL}/api?m=release&id=${id}&sort=episode_dsc&page=1`, { headers: this.headers });
             const firstPage: any = await firstPageRes.json();
             if (!firstPage?.data) return [];
+            
             let allData = [...firstPage.data];
+            
             if (firstPage.last_page > 1) {
                 const pages = Array.from({ length: firstPage.last_page - 1 }, (_, i) => i + 2);
                 const remaining = await Promise.all(pages.map(p => fetch(`${BASE_URL}/api?m=release&id=${id}&sort=episode_dsc&page=${p}`, { headers: this.headers }).then(r => r.json())));
@@ -206,23 +204,34 @@ export class AnimepaheScraper {
         } catch { return []; }
     }
 
+    // 🚀 CLIENT-SIDE DELEGATION (Provides the URL for your Flutter WebView)
     async getSources(animeId: string, episodeSession: string) {
         const sources = [];
         try {
             const res = await fetch(`${BASE_URL}/play/${animeId}/${episodeSession}`, { headers: this.headers });
             const html = await res.text();
             const $ = cheerio.load(html);
+            
             const buttons = $("div#resolutionMenu > button").toArray();
+
             for (let i = 0; i < buttons.length; i++) {
                 const btn = $(buttons[i]);
                 const audio = btn.attr("data-audio") ?? "unknown";
                 const kwikLink = btn.attr("data-src") ?? "";
                 const quality = btn.attr("data-resolution") ?? "unknown";
+
                 if (kwikLink) {
-                    sources.push({ quality, audio, url: kwikLink, isM3U8: false });
+                    sources.push({
+                        quality,
+                        audio,
+                        url: kwikLink, // We return the Kwik Embed URL directly
+                        isM3U8: false,
+                    });
                 }
             }
-        } catch (err: any) {}
+        } catch (err: any) {
+            console.error("Failed to fetch resolutions:", err);
+        }
         return { sources };
     }
 }
