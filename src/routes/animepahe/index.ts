@@ -50,9 +50,8 @@ animepaheRouter.get("/anime/:animeId/episodes", async (c) => {
     }
 });
 
-// 5. SOURCES (Stream Links)
+// 5. SOURCES (Returns Kwik embed links to be solved by Flutter WebView)
 animepaheRouter.get("/episode/sources", async (c) => {
-    // Note: Animepahe requires both the Anime ID and the Episode Session ID
     const animeId = decodeURIComponent(c.req.query("animeId") || "");
     const session = decodeURIComponent(c.req.query("session") || "");
 
@@ -64,7 +63,8 @@ animepaheRouter.get("/episode/sources", async (c) => {
         const res = await animepahe.getSources(animeId, session);
         return c.json({ 
             data: { 
-                sources: res,
+                requiresClientFetch: true, // Tells Flutter to use WebView!
+                sources: res.sources,
                 headers: { "Referer": "https://kwik.cx/" } 
             } 
         }, 200);
@@ -73,7 +73,7 @@ animepaheRouter.get("/episode/sources", async (c) => {
     }
 });
 
-// 6. THE DYNAMIC MATCHER ENDPOINT
+// 6. THE DYNAMIC MATCHER
 animepaheRouter.post("/map", async (c) => {
     try {
         const body = await c.req.json();
